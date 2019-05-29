@@ -1,3 +1,5 @@
 *.pyc
+*.py___jb_tmp___
 
-idea/*
+.idea/*
+
