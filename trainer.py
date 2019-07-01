@@ -12,6 +12,23 @@ class VAE_Trainer:
         self.device = device
         self.testLoader = testloader
 
+    def single_pass(self):
+        self.model.eval()
+
+        array = torch.Tensor().to("cuda")
+        targets = torch.Tensor().long().to("cuda")
+
+        with torch.no_grad():
+            for batch_index, (data, target) in enumerate(self.testLoader):
+                data = data.to(self.device)
+                latent_repr = self.model.encode(data)
+
+                array = torch.cat((array, latent_repr[0] ), 0)
+                targets = torch.cat((targets, target.to("cuda")), 0)
+                print(array.size(), end="\r")
+        print("")
+        return array, targets
+
     def train(self, epoch):
         self.model.train()
         train_loss = 0
@@ -93,7 +110,7 @@ class GAN_trainer:
 
 #todo
 class VAE_GAN_trainer:
-    def __init__(self, d_model, g_model, dataloader, d_optimizer, g_optimizer, device, g_loss):
+    def __init__(self, d_model, g_model, dataloader, d_optimizer, g_optimizer, device, g_loss, testLoader=None):
         self.d_model = d_model
         self.g_model = g_model
         self.d_optimizer = d_optimizer
@@ -102,7 +119,30 @@ class VAE_GAN_trainer:
         self.g_loss = g_loss
 
         self.dataLoader = dataloader
+        self.testLoader = testLoader
         self.device = device
+
+        self.margin = .45
+        self.eq = .5
+
+
+    def single_pass(self):
+        self.g_model.eval()
+
+        array = torch.Tensor().to("cuda")
+        targets = torch.Tensor().long().to("cuda")
+
+        with torch.no_grad():
+            for batch_index, (data, target) in enumerate(self.testLoader):
+                data = data.to(self.device)
+                latent_repr = self.g_model.encode(data)
+
+                array = torch.cat((array, latent_repr[0] ), 0)
+                targets = torch.cat((targets, target.to("cuda")), 0)
+                print(array.size(), end="\r")
+        print("")
+        return array, targets
+
 
     def train_the_G(self, batch_data, target, gan_weight=500, vae_weight=1):
         self.g_model.zero_grad()
@@ -140,6 +180,7 @@ class VAE_GAN_trainer:
         train_loss = [0, 0, 0, 0]
         start_time = time.time()
         for batch_index, (data, target) in enumerate(self.dataLoader):
+            print(data.size())
             # train the G
             data = data.to(self.device)
             mean, logvar = self.g_model.encode(data)
@@ -156,37 +197,62 @@ class VAE_GAN_trainer:
             true_labels = self.d_model(data)
             fake_labels = self.d_model(xp)
 
-            (loss_encoder, loss_decoder, loss_discriminator), (o,f) = losses.enc_dec_dis_losses(o_layer=true_hidden, r_layer=fake_hidden, true_labels=true_labels, fake_labels=fake_labels, logvar=logvar, mean=mean, lambda_mse=.5)
+            (loss_encoder, loss_decoder, loss_discriminator), (o,f) = losses.enc_dec_dis_losses(o_layer=true_hidden, r_layer=fake_hidden, true_labels=true_labels, fake_labels=fake_labels, logvar=logvar, mean=mean, lambda_mse=.0005)
+
+            train_dis = True
+            train_dec = True
+            # if o < self.margin + self.eq or o < self.margin + self.eq:
+            # if o < self.margin - self.eq or f < self.margin - self.eq:
+            # if o < ( self.eq - self.margin)*self.dataLoader.batch_size or f < ( self.eq - self.margin)*self.dataLoader.batch_size:
+            if o < (self.eq - self.margin) or f < (self.eq - self.margin):
+            # if loss_decoder > loss_discriminator * .1:
+                train_dis = False
+            # if f > self.margin - self.eq or f > self.margin - self.eq:
+            # if o > self.margin + self.eq or f > self.margin + self.eq:
+            #if o > (self.margin + self.eq)*self.dataLoader.batch_size or f > (self.margin + self.eq)*self.dataLoader.batch_size:
+            # if loss_decoder * .1 < loss_discriminator:
+            if o > (self.margin + self.eq)or f > (self.margin + self.eq):
+                train_dec = False
+            if not train_dec and not train_dis:
+                train_dec = True
+                train_dis = True
 
             self.g_model.zero_grad()
             self.d_model.zero_grad()
 
             loss_encoder.backward(retain_graph=True)
-            loss_decoder.backward(retain_graph=True)
 
+            if train_dec:
+                loss_decoder.backward(retain_graph=True)
+                self.d_model.zero_grad()
             self.g_optimizer.step() # todo: split it
-            self.d_model.zero_grad()
             # self.g_model.zero_grad()
-            loss_discriminator.backward()
-            self.d_optimizer.step()
-
+            if train_dis:
+                loss_discriminator.backward()
+                self.d_optimizer.step()
 
             train_loss = [train_loss[0] + o.item(), train_loss[1] + f.item(), train_loss[2] + loss_encoder.item(), train_loss[3] + loss_decoder.item() ]
 
             # torch.cuda.empty_cache()
 
-            print("Train epoch {0} ({1:.1f}%) >> losses: D: {2:.2f} ({3:.2f} /{4:.2f} )    G: {5:.2f} / {6:.2f}".format(epoch,100 * (batch_index / (len(self.dataLoader.dataset) / self.dataLoader.batch_size)),
-                (o + f),
-                o,
-                f,
-                loss_encoder,
-                loss_decoder),end="\r")
-        print("Train epoch {0} (100.0%) >> avg.loss: {1:.2f} ({3:.2f} /{4:.2f} )    G: {5:.2f} / {6:.2f} {2:^55} ".format(
+            print("Train epoch {0} ({1:.1f}%) >> losses: D: {2:.2f} (o:{3:.2f} + f:{4:.2f} )  enc: {5:.2f}  dec {6:.2f}     {7}  {8}".format(
+                epoch,
+                100 * (batch_index / (len(self.dataLoader.dataset) / self.dataLoader.batch_size)),
+                (o + f)/ self.dataLoader.batch_size ,
+                o/ self.dataLoader.batch_size,
+                f/ self.dataLoader.batch_size,
+                loss_encoder/ self.dataLoader.batch_size,
+                loss_decoder/ self.dataLoader.batch_size,
+                "" if train_dec else "e",
+                "" if train_dis else "i"
+                ),
+                end="\r")
+        print("Train epoch {0} (100.0%) >> avg.loss: {1:.2f} (o:{3:.2f} + f:{4:.2f} )  enc: {5:.2f}  dec {6:.2f} {2:^55} ".format(
             epoch,
-            (train_loss[1] + train_loss[0]),
+            (train_loss[1] + train_loss[0]) / len(self.dataLoader.dataset),
             "elapsed time: {0:.2f} s.".format(time.time() - start_time),
-            train_loss[0],
-            train_loss[1],
+            train_loss[0]/ len(self.dataLoader.dataset),
+            train_loss[1]/ len(self.dataLoader.dataset),
             train_loss[2] / len(self.dataLoader.dataset),
             train_loss[3] / len(self.dataLoader.dataset)))
 

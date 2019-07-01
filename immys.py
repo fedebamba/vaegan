@@ -1,5 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
 
 
 def gen_random_figs(net, n=(3,4), size=28):
@@ -23,4 +24,14 @@ def show_images(images):
     plt.show()
 
 
+def show_latent_space(other_trainer):
+    X, c = other_trainer.single_pass()
+    X, c = X.cpu().numpy(), c.cpu().numpy()
+
+    X_embeddes = TSNE().fit_transform(X)
+
+    print(X_embeddes[:, 0].shape)
+    plt.scatter(X_embeddes[:, 0], X_embeddes[:, 1], c=c, label=c)
+    plt.legend(loc=2)
+    plt.show()
 

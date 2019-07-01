@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
+
 class Weighted_net(nn.Module):
     def __init__(self):
         super(Weighted_net, self).__init__()
@@ -130,3 +131,77 @@ class Discriminator_net(Weighted_net):
             return self.final(x), x1
         else:
             return self.final(x)
+
+
+
+class VAE_CELEBA(Weighted_net):
+    def __init__(self):
+        super(VAE_CELEBA, self).__init__()
+        self.valueimtolazytocalc = 8*8*256
+        self.encoder_conv = nn.Sequential(
+            nn.Conv2d(3, 64, 5, padding=2),
+            nn.MaxPool2d(2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, 5, padding=2),
+            nn.MaxPool2d(2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 256, 5, padding=2),
+            nn.MaxPool2d(2),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        ) # 8x8x256
+        self.encoder_fullyConnected = nn.Sequential(
+            nn.Linear(self.valueimtolazytocalc, 2048),
+            nn.BatchNorm1d(2048),
+            nn.ReLU(),
+        )
+        self.encoder_mean = nn.Linear(2048, 2048)
+        self.encoder_sigma = nn.Linear(2048, 2048)
+
+        # decoder....
+        self.decoder_fullyConnected = nn.Sequential(
+            nn.Linear(2048, self.valueimtolazytocalc),
+            nn.BatchNorm1d(self.valueimtolazytocalc),
+            nn.ReLU(),
+        )
+        self.decoder_conv = nn.Sequential(
+            nn.Conv2d(256, 128, 5, padding=2),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 64, 5, padding=2),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 32, 5, padding=2),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 3, 5, padding=2),
+            nn.Tanh()
+        ) # tanh in fondo
+
+    def encode(self, x):
+        x = self.encoder_conv(x)
+        x = x.view(-1, self.valueimtolazytocalc)
+        x = self.encoder_fullyConnected(x)
+        return self.encoder_mean(x), self.encoder_sigma(x)
+
+    def gaussian_sampling(self, mean, sigma):
+        std = torch.exp(sigma*.5)
+        es = torch.randn_like(std)
+        return mean + es*std
+
+    def decode(self, sample):
+        sample = sample.view(-1, 2048)
+        sample = self.decoder_fullyConnected(sample)
+        sample = sample.view(-1, 256,8,8)
+        return self.decoder_conv(sample)
+
+
+    def forward(self, x):
+        mean, var = self.encode(x)
+        z = self.gaussian_sampling(mean, var)
+        return self.decode(z), mean, var
