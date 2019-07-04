@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import ImageFolder
 from torchvision import transforms
+import matplotlib.pyplot as plt
 
 
 import networks
@@ -25,7 +26,9 @@ c = Celeba()
 model = networks.VAE_CELEBA().to("cuda")
 optimizer = torch.optim.RMSprop(model.parameters(), lr=5e-4)
 
-for i in range(50):
+
+
+for i in range(10):
     mega = 2**20
 
     model.train()
@@ -51,5 +54,32 @@ for i in range(50):
             i,
             train_loss / len(c.dataset),
             "elapsed time: {0:.2f} s.".format(time.time() - start_time)))
+
+
+
+
+
+
+
+
+
+
+
+    # show images
+    n = (3,4)
+    imgs = [torch.randn(2048).to('cuda') for x in range(n[0] * n[1])]
+    imgs_rec = [model.decode_single_image(t).cpu().detach() for t in imgs]
+
+    fig = plt.figure()
+    for i in range(len(imgs_rec)):
+        fig.add_subplot(n[0], n[1], i + 1)
+        plt.imshow(imgs_rec[i])
+    plt.show()
+
+    t = transforms.ToPILImage()
+    for el in data:
+        plt.imshow(t(el))
+        plt.show()
+
 
 

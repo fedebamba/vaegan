@@ -200,6 +200,11 @@ class VAE_CELEBA(Weighted_net):
         sample = sample.view(-1, 256,8,8)
         return self.decoder_conv(sample)
 
+    def decode_single_image(self, sample):
+        sample = sample.view(-1, 2048)
+        x =  self.decode(sample)
+        return x.reshape(64,64)
+
 
     def forward(self, x):
         mean, var = self.encode(x)
